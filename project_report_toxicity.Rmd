@@ -1,0 +1,202 @@
+---
+title: "QSAR Fish Toxicity Data Set](https://archive.ics.uci.edu/ml/datasets/QSAR+fish+toxicity)"
+runtime: shiny
+output:
+  html_document:
+    toc: true
+  pdf_document:
+    toc: false
+---
+
+```{r setup, include=FALSE}
+library(DT)
+library(reshape2)
+library(ggplot2)
+library(dplyr)
+library(plotly)
+library(tidyverse)
+library(GGally)
+library(leaps)
+library(scales)
+library(corrplot)
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Data
+This dataset was used to develop quantitative regression QSAR models to predict acute aquatic toxicity towards the fish Pimephales promelas (fathead minnow) on a set of 908 chemicals. LC50 data, which is the concentration that causes death in 50% of test fish over a test duration of 96 hours, was used as model response. The model comprised 6 molecular descriptors: MLOGP (molecular properties), CIC0 (information indices), GATS1i (2D autocorrelations), NdssC (atom-type counts), NdsCH ((atom-type counts), SM1_Dz(Z) (2D matrix-based descriptors). Details can be found in the quoted reference: M. Cassotti, D. Ballabio, R. Todeschini, V. Consonni. A similarity-based QSAR model for predicting acute toxicity towards the fathead minnow (Pimephales promelas), SAR and QSAR in Environmental Research (2015), 26, 217-243; doi: 10.1080/1062936X.2015.1018938
+
+### Attribute Information
+6 molecular descriptors and 1 quantitative experimental response:
+
+1. CIC0
+2. SM1_Dz(Z)
+3. GATS1i
+4. NdsCH
+5. NdssC
+6. MLOGP
+7. quantitative response, LC50 [-LOG(mol/L)]
+
+```{r, echo=FALSE}
+dt2 <- read.csv("data/qsar_fish_toxicity.csv", sep = ";", header = FALSE)
+# variable names: 
+origcnames <- c("CIC0","SM1_Dz(Z)","GATS1i", 
+                "NdsCH", "NdssC", "MLOGP", "LC50 [-LOG(mol/L)]")
+cnames <- c("CIC0","SM1_Dz","GATS1i", 
+            "NdsCH", "NdssC", "MLOGP", "y")
+dt2 <- setNames(dt2, cnames)
+dt <- dt2
+dt <- setNames(dt, cnames)
+# data summary table
+summarydt <- as.data.frame(do.call(cbind, lapply(dt, summary)))
+dtraw <- dt
+
+# normalizing raw data
+dtnorm <- data.frame(lapply(dtraw[c("CIC0","SM1_Dz","GATS1i", "MLOGP", "y")], function(x) {
+  (x-mean(x))/(max(x) - min(x)) # scaling all variables from 0 to 1
+})) 
+dtnorm2 <-  cbind(dtnorm[,c("CIC0","SM1_Dz","GATS1i")], 
+                  dtraw[,c("NdsCH")], dtraw[,c("NdssC")], dtnorm[,c("MLOGP","y")])
+dtnorm2 <- setNames(dtnorm2, cnames)
+
+#dt <- dtnorm2 #using normalized dt in the following analyses
+```
+
+### Datatable {.tabset}
+#### Raw Data
+```{r, echo=FALSE}
+DT::datatable(dtraw, class = 'cell-border stripe', rownames = T, extensions = 'Scroller', 
+              caption = 'Data', options = list(scrollCollapse = TRUE))
+```
+
+#### Normalized Data
+```{r, echo=FALSE}
+DT::datatable(dt, class = 'cell-border stripe', rownames = T, extensions = 'Scroller', 
+              caption = 'Normalized Data ("NdsCH", "NdssC" variables are not normalized)', 
+              options = list(scrollCollapse = TRUE))
+```
+
+#### Statistics Summary of Normalized Data
+```{r, echo=FALSE}
+DT::datatable(summarydt, class = 'cell-border stripe', rownames = T, extensions = 'Scroller', 
+              caption = 'Data Summary', options = list(scrollCollapse = TRUE))
+```
+
+</div>
+
+### Boxplots
+```{r, echo=FALSE, eval = T, fig.height=8}
+suppressMessages({
+  meltdt <- melt(dt)
+})
+p <- ggplot(data = meltdt, aes(factor(variable),value)) + geom_boxplot() + facet_wrap(~variable, scale="free") + xlab("") + ylab("")
+p %>% ggplotly(.) 
+```
+
+```{r}
+p <- ggplot(data = meltdt, aes(factor(variable),value)) + geom_boxplot() + xlab("") + ylab("")
+p %>% ggplotly(.) 
+```
+
+### Histograms
+#### Histogram of Response Variable
+```{r, echo=FALSE}
+inputPanel(
+  sliderInput("n_breaks", label = "Bandwidth adjustment:",
+              min = 5, max = 50, value = 20, step = 1)
+)
+
+renderPlot({
+  hist(dt$y, probability = F, breaks = as.numeric(input$n_breaks),
+       xlab = origcnames[ncol(dt)], main = "Histogram of Response Variable")
+})
+```
+
+#### Histograms of Explanatory Variables
+```{r, echo=FALSE}
+inputPanel(
+  sliderInput("n_breaks2", label = "Bandwidth adjustment:",
+              min = 0.01, max = 1, value = 0.20, step = 0.01)
+)
+
+renderPlot({
+  ncols = ncol(dt) - 1
+  histlist <- lapply(1:ncols, 
+                   function(col) ggplot2::qplot(dt[[col]], xlab = origcnames[col],
+                                                geom = "histogram", binwidth = input$n_breaks2))
+  cowplot::plot_grid(plotlist = histlist)
+})
+```
+
+### Scatter Plots & Correlations
+```{r, echo=FALSE, fig.width= 10, fig.height= 9}
+suppressWarnings({
+  ggpairs(dt) %>% ggplotly(.) # from GGally package
+})
+```
+
+### Correlation Heat Map
+```{r, echo=FALSE, fig.width=5, fig.height=5}
+renderPlot({
+  corrplot(cor(dt), method = "number", type = "upper")
+})
+```
+
+## Models (TODO)
+```{r model_helper_fn, echo = F}
+getYhat <- function(reg, y) {
+  X <- model.matrix(reg)
+  bhat <- solve(t(X) %*% X, t(X) %*% y)
+  yhat <- X %*% bhat
+  return (yhat)
+}
+getResidualPlot <- function(y, reg) {
+  yhat <- getYhat(reg, y)
+  resids <- y - yhat
+  return (plot(x = yhat, y = resids, xlab = "fitted y", ylab = "residuals"))
+}
+```
+
+### Using `regsubsets()` to find best-fitted model
+```{r}
+models <- regsubsets(dt$y ~., data = dt, method = "exhaustive")
+models_summary <- summary(models); models_summary
+models_res <- data.frame(
+  Adj.R2 = which.max(models_summary$adjr2),
+  CP = which.min(models_summary$cp)
+); models_res # observation: model 6
+
+models_summary$adjr2
+```
+
+#### Best-fitted model summary
+```{r}
+# Using the best model (model 6, selecting all variables) (& generate residual plot):
+reg <- lm(dt$y ~ ., data = dt)
+summary(reg)
+```
+
+#### Residual Plots
+```{r, echo = F, fig.height=4, fig.width=4}
+# Plot residuals vs. response variable
+yhat <- getYhat(reg, dt$y)
+resids <- dt$y - yhat
+p <- {ggplot(data = dt, aes(x= yhat, y = resids)) + geom_point()} %>% ggplotly(.)
+p
+```
+
+```{r, echo = F, fig.height=5, fig.width=8}
+# Plot residuals vs. all explanatory variables
+yhat <- getYhat(reg, dt$y)
+resids <- dt$y - yhat
+result <- dt[c(-ncol(dt))] # results contain all explanatory variables (excluding y)
+result["residuals"] <- resids
+dtmelt <- melt(result, "residuals")
+
+p <- {ggplot(data = dtmelt, aes(x= value, y = residuals)) + geom_point() +
+    facet_wrap(~variable, scales = "free")} %>% ggplotly(.)
+p
+```
+
+```{r}
+
+```
+

@@ -1,0 +1,117 @@
+---
+title: "[Yacht Hydrodynamics Data Set](https://archive.ics.uci.edu/ml/datasets/Yacht+Hydrodynamics)"
+runtime: shiny
+output:
+  html_document:
+    toc: true
+  pdf_document:
+    toc: false
+---
+
+```{r setup, include=FALSE}
+library(DT)
+library(reshape2)
+library(ggplot2)
+library(dplyr)
+library(plotly)
+library(tidyverse)
+library(GGally)
+library(leaps)
+library(scales)
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Data
+### Attribute Information
+Variations concern hull geometry coefficients and the Froude number:
+
+1. Longitudinal position of the center of buoyancy, adimensional. (**pos**)
+2. Prismatic coefficient, adimensional. (**pcoeff**)
+3. Length-displacement ratio, adimensional.  (**ld_ratio**)
+4. Beam-draught ratio, adimensional. (**bd_ratio**)
+5. Length-beam ratio, adimensional.  (**lb_ratio**)
+6. Froude number, adimensional.  (**froude**)
+
+The measured variable is the residuary resistance per unit weight of displacement:
+
+7. Residuary resistance per unit weight of displacement, adimensional.
+
+```{r, echo=FALSE}
+dt <- read.table("data/yacht_hydrodynamics.data")
+origcnames <- c("Longitudinal position of the center of buoyancy",
+               "Prismatic coefficient",
+               "Length-displacement ratio",
+               "Beam-draught ratio",
+               "Length-beam ratio",
+               "Froude number",
+               "Residuary resistance per unit weight of displacement"
+               )
+cnames <- c("pos","pcoeff","ld_ratio",
+                       "bd_ratio", "lb_ratio", "froude","y")
+dt <- setNames(dt, cnames)
+# data summary table
+summarydt <- as.data.frame(do.call(cbind, lapply(dt, summary)))
+```
+
+### Datatable {.tabset}
+#### Raw Data
+```{r, echo=FALSE}
+DT::datatable(dt, class = 'cell-border stripe', rownames = T, extensions = 'Scroller', 
+              caption = 'Yacht Hydrodynamic Data', options = list(scrollCollapse = TRUE))
+```
+
+#### Statistics Summary
+```{r, echo=FALSE}
+DT::datatable(summarydt, class = 'cell-border stripe', rownames = T, extensions = 'Scroller', 
+              caption = 'Data Summary', options = list(scrollCollapse = TRUE))
+```
+
+</div>
+
+### Boxplots
+```{r, echo=FALSE, eval = T, fig.height=8}
+suppressMessages({
+  meltdt <- melt(dt)
+})
+p <- ggplot(data = meltdt, aes(factor(variable),value)) + geom_boxplot() + facet_wrap(~variable, scale="free") + xlab("") + ylab("")
+p %>% ggplotly(.) 
+```
+
+### Histograms
+#### Histogram of Response Variable
+```{r, echo=FALSE}
+inputPanel(
+  sliderInput("n_breaks", label = "Bandwidth adjustment:",
+              min = 5, max = 50, value = 20, step = 1)
+)
+
+renderPlot({
+  hist(log(dt$y), probability = F, breaks = as.numeric(input$n_breaks),
+       xlab = origcnames[ncol(dt)], main = "Histogram of Response Variable")
+})
+```
+
+#### Histograms of Explanatory Variables
+```{r, echo=FALSE}
+inputPanel(
+  sliderInput("n_breaks2", label = "Bandwidth adjustment:",
+              min = 0.01, max = 0.5, value = 0.05, step = 0.005)
+)
+
+renderPlot({
+  ncols = ncol(dt) - 1
+  histlist <- lapply(1:ncols, 
+                   function(col) ggplot2::qplot(dt[[col]], xlab = origcnames[col],
+                                                geom = "histogram", binwidth = input$n_breaks2))
+cowplot::plot_grid(plotlist = histlist)
+})
+```
+
+### Scatter Plots & Correlations
+```{r, echo=FALSE, fig.width= 10, fig.height= 9}
+suppressWarnings({
+  ggpairs(dt) %>% ggplotly(.) # from GGally package
+})
+```
+
+## Models
+TODO
